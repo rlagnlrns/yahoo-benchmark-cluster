@@ -11,11 +11,11 @@ MVN=${MVN:-mvn}
 GIT=${GIT:-git}
 MAKE=${MAKE:-make}
 
-KAFKA_VERSION=${KAFKA_VERSION:-"0.8.2.1"}
+KAFKA_VERSION=${KAFKA_VERSION:-"2.0.0"}
 REDIS_VERSION=${REDIS_VERSION:-"4.0.11"}
 SCALA_BIN_VERSION=${SCALA_BIN_VERSION:-"2.11"}
 SCALA_SUB_VERSION=${SCALA_SUB_VERSION:-"12"}
-SPARK_VERSION=${SPARK_VERSION:-"2.3.1"}
+SPARK_VERSION=${SPARK_VERSION:-"2.4.0"}
 HADOOP_VERSION=${HADOOP_VERSION:-"2.7.7"}
 
 REDIS_DIR="redis-$REDIS_VERSION"
@@ -27,7 +27,9 @@ HADOOP_DIR="hadoop-$HADOOP_VERSION"
 APACHE_MIRROR=$"https://archive.apache.org/dist"
 
 IP_LIST_INNER=("10.178.0.22" "10.178.0.23" "10.178.0.24")
+#IP_LIST_INNER=("10.178.0.22")
 IP_LIST_OUTER=("34.64.192.22" "34.64.235.200" "34.64.79.251")
+#IP_LIST_OUTER=("34.64.192.22")
 
 ZK_PORT="2181"
 ZK_CONNECTIONS=""
@@ -136,7 +138,7 @@ run() {
     echo >> $CONF_FILE
     echo 'kafka.port: '$KAFKA_PORT >> $CONF_FILE
 	echo 'zookeeper.port: '$ZK_PORT >> $CONF_FILE
-	echo 'redis.host: "localhost"' >> $CONF_FILE
+	echo 'redis.host: "10.178.0.25"' >> $CONF_FILE
 	echo 'kafka.topic: "'$TOPIC'"' >> $CONF_FILE
 	echo 'kafka.partitions: '$PARTITIONS >> $CONF_FILE
 	echo 'process.hosts: 1' >> $CONF_FILE
@@ -164,8 +166,8 @@ run() {
     fetch_untar_file "$SPARK_FILE" "$APACHE_MIRROR/spark/spark-$SPARK_VERSION/$SPARK_FILE"
 
     #Fetch Hadoop
-    HADOOP_FILE="$HADOOP_DIR.tar.gz"
-    fetch_untar_file "$HADOOP_FILE" "$APACHE_MIRROR/hadoop/core/$HADOOP_FILE"
+    #HADOOP_FILE="$HADOOP_DIR.tar.gz"
+    #fetch_untar_file "$HADOOP_FILE" "$APACHE_MIRROR/hadoop/core/$HADOOP_FILE"
 
   elif [ "START_ZK" = "$OPERATION" ];
   then
@@ -228,7 +230,7 @@ run() {
     cd ..
   elif [ "START_SPARK_PROCESSING" = "$OPERATION" ];
   then
-    "$SPARK_DIR/bin/spark-submit" --master yarn --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
+    "$SPARK_DIR/bin/spark-submit" --packages org.apache.spark:spark-sql-kafka-0-10_2.11:$SPARK_VERSION  --master yarn --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
 #    "$SPARK_DIR/bin/spark-submit" --master spark://localhost:7077 --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
     sleep 5
   elif [ "STOP_SPARK_PROCESSING" = "$OPERATION" ];

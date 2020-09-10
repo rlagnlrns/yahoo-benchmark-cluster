@@ -8,6 +8,7 @@
 package spark.benchmark
 
 import java.util
+import java.util.HashSet
 
 import kafka.serializer.StringDecoder
 import org.apache.spark.streaming
@@ -27,6 +28,12 @@ import benchmark.common.Utils
 import scala.collection.JavaConverters._
 import scala.collection.mutable.Buffer
 
+import org.apache.spark.sql._
+import org.apache.spark.sql.types._
+import org.apache.spark.sql.functions.{from_json,col}
+import org.apache.spark.sql.streaming.Trigger
+
+
 object KafkaRedisAdvertisingStream {
   def main(args: Array[String]) {
 
@@ -40,11 +47,15 @@ object KafkaRedisAdvertisingStream {
       case other => throw new ClassCastException(other + " not a String")
     }
 
-    val redisHost = commonConfig.get("redis.host") match {
+    val redisPost = commonConfig.get("redis.host") match {
       case s: String => s
-      case other => throw new ClassCastException(other + " not a String")
+      case other => throw new ClassCastException(other + " not a List[String]")
     }
-    
+    //########################################################################################
+    //########################################################################################
+    //########################################################################################
+    val redisHost = List("10.178.0.22","10.178.0.23","10.178.0.24")
+
     // Create context with 2 second batch interval
     val sparkConf = new SparkConf().setAppName("KafkaRedisAdvertisingStream")
     val ssc = new StreamingContext(sparkConf, Milliseconds(batchSize))
@@ -64,35 +75,56 @@ object KafkaRedisAdvertisingStream {
     val kafkaParams = Map[String, String]("metadata.broker.list" -> brokers, "auto.offset.reset" -> "smallest")
     System.err.println(
       "Trying to connect to Kafka at " + brokers)
-    val messages = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
-      ssc, kafkaParams, topicsSet)
+   // val messages = KafkaUtils.createDirectStream[String, String, StringDecoder, StringDecoder](
+   //   ssc, kafkaParams, topicsSet)
 
     //We can repartition to use more executors if desired
     //    val messages_repartitioned = messages.repartition(10)
 
+    val spark = SparkSession.builder.appName("KafkaReader").getOrCreate()
+    val df = spark.readStream.format("kafka").option("kafka.bootstrap.servers",brokers).option("subscribe","ad-events").load()
+    df.printSchema()
+
+    import spark.implicits._
+    val df2 = df.selectExpr("CAST(value AS STRING)")
+    val struct = new StructType().add(StructField("user_id", StringType,false)).add(StructField("page_id", StringType,false))
+    .add(StructField("ad_id", StringType,false)).add(StructField("ad_type", StringType,false)).add(StructField("event_type", StringType,false))
+    .add(StructField("event_time", StringType,true)).add(StructField("ip_address", StringType,false))
+    val events = df2.select(from_json($"value",struct).as("events"))
+    events.printSchema()
+
+    val df3 = events.select("events.ad_id","events.event_time","events.event_type")
+    df3.printSchema()
+
+    //val query = df3.writeStream.format("console").start().awaitTermination()
+
+    val query = df3.writeStream.outputMode("update").foreachBatch{(batchDF: DataFrame,batchId: Long)=>
+    batchDF.foreachPartition(writeRedisTopLevel(_,redisHost))}.start()
+    query.awaitTermination()
+
 
     //take the second tuple of the implicit Tuple2 argument _, by calling the Tuple2 method ._2
     //The first tuple is the key, which we don't use in this benchmark
-    val kafkaRawData = messages.map(_._2)
+    //val kafkaRawData = messages.map(_._2)
 
     //Parse the String as JSON
-    val kafkaData = kafkaRawData.map(parseJson(_))
+    //val kafkaData = kafkaRawData.map(parseJson(_))
 
     //Filter the records if event type is "view"
-    val filteredOnView = kafkaData.filter(_(4).equals("view"))
+    //val filteredOnView = kafkaData.filter(_(4).equals("view"))
 
     //project the event, basically filter the fileds.
-    val projected = filteredOnView.map(eventProjection(_))
+    //val projected = filteredOnView.map(eventProjection(_))
 
     //Note that the Storm benchmark caches the results from Redis, we don't do that here yet
-    val redisJoined = projected.mapPartitions(queryRedisTopLevel(_, redisHost), false)
+    //val redisJoined = projected.mapPartitions(queryRedisTopLevel(_, redisHost), false)
 
-    val campaign_timeStamp = redisJoined.map(campaignTime(_))
+    //val campaign_timeStamp = redisJoined.map(campaignTime(_))
     //each record in the RDD: key:(campaign_id : String, window_time: Long),  Value: (ad_id : String)
     //DStream[((String,Long),String)]
 
     // since we're just counting use reduceByKey
-    val totalEventsPerCampaignTime = campaign_timeStamp.mapValues(_ => 1).reduceByKey(_ + _)
+    //val totalEventsPerCampaignTime = campaign_timeStamp.mapValues(_ => 1).reduceByKey(_ + _)
 
     //DStream[((String,Long), Int)]
     //each record: key:(campaign_id, window_time),  Value: number of events
@@ -100,13 +132,13 @@ object KafkaRedisAdvertisingStream {
     //Repartition here if desired to use more or less executors
     //    val totalEventsPerCampaignTime_repartitioned = totalEventsPerCampaignTime.repartition(20)
 
-    totalEventsPerCampaignTime.foreachRDD { rdd =>
-      rdd.foreachPartition(writeRedisTopLevel(_, redisHost))
-    }
+    //totalEventsPerCampaignTime.foreachRDD { rdd =>
+      //rdd.foreachPartition(writeRedisTopLevel(_, redisHost))
+    //}
 
     // Start the computation
-    ssc.start
-    ssc.awaitTermination
+    //ssc.start
+    //ssc.awaitTermination
   }
 
   def joinHosts(hosts: Seq[String], port: String): String = {
@@ -174,38 +206,61 @@ object KafkaRedisAdvertisingStream {
     ((event(0),time_divisor * (event(2).toLong / time_divisor)), event(1))
     //Key: (campaign_id, window_time),  Value: ad_id
   }
-
-  def writeRedisTopLevel(campaign_window_counts_Iterator: Iterator[((String, Long), Int)], redisHost: String) {
-    val pool = new Pool(new JedisPool(new JedisPoolConfig(), redisHost, 6379, 2000))
-
-    campaign_window_counts_Iterator.foreach(campaign_window_counts => writeWindow(pool, campaign_window_counts))
-
-    pool.underlying.getResource.close
+  def writeRedisTopLevel(campaign_window_counts_Iterator: Iterator[org.apache.spark.sql.Row], redisHost: List[String]) {
+    //val pool = new Pool(new JedisPool(new JedisPoolConfig(), redisHost, 6379, 2000))
+    val jedisClusterNodes = new HashSet[HostAndPort]
+    redisHost.foreach(host=> jedisClusterNodes.add(new HostAndPort(host,6379)))
+    val jc: JedisCluster = new JedisCluster(jedisClusterNodes)
+    campaign_window_counts_Iterator.foreach(campaign_window_counts => writeWindow(jc, campaign_window_counts))
+    jc.close()
+    //pool.underlying.getResource.close
   }
 
-  private def writeWindow(pool: Pool, campaign_window_counts: ((String, Long), Int)) : String = {
-    val campaign_window_pair = campaign_window_counts._1
-    val campaign = campaign_window_pair._1
-    val window_timestamp = campaign_window_pair._2.toString
-    val window_seenCount = campaign_window_counts._2
-    pool.withJedisClient { client =>
+  private def writeWindow(pool: JedisCluster, campaign_window_counts: org.apache.spark.sql.Row) : String = {
+    val campaign_window_pair = campaign_window_counts(1).toString()
+    val event_type = campaign_window_counts(2).toString()
+    pool.hset(campaign_window_pair,"event_type",event_type)
+    return "event_type"
 
-      val dressUp = Dress.up(client)
-      var windowUUID = dressUp.hmget(campaign, window_timestamp)(0)
-      if (windowUUID == null) {
-        windowUUID = UUID.randomUUID().toString
-        dressUp.hset(campaign, window_timestamp, windowUUID)
-        var windowListUUID: String = dressUp.hmget(campaign, "windows")(0)
-        if (windowListUUID == null) {
-          windowListUUID = UUID.randomUUID.toString
-          dressUp.hset(campaign, "windows", windowListUUID)
-        }
-        dressUp.lpush(windowListUUID, window_timestamp)
-      }
-      dressUp.hincrBy(windowUUID, "seen_count", window_seenCount)
-      dressUp.hset(windowUUID, "time_updated", currentTime.toString)
-      return window_seenCount.toString
-    }
-
+    //pool.withJedisClient { client =>
+      //val dressUp = Dress.up(client)
+      //dressUp.hset(campaign_window_pair,"event_type",event_type)
+      //return "event_type"
+    //}
   }
 }
+
+ // def writeRedisTopLevel(campaign_window_counts_Iterator: Iterator[((String, Long), Int)], redisHost: String) {
+   // val pool = new Pool(new JedisPool(new JedisPoolConfig(), redisHost, 6379, 2000))
+
+   // campaign_window_counts_Iterator.foreach(campaign_window_counts => writeWindow(pool, campaign_window_counts))
+//
+//    pool.underlying.getResource.close
+//  }
+//
+//  private def writeWindow(pool: Pool, campaign_window_counts: ((String, Long), Int)) : String = {
+//    val campaign_window_pair = campaign_window_counts._1
+//    val campaign = campaign_window_pair._1
+//    val window_timestamp = campaign_window_pair._2.toString
+//    val window_seenCount = campaign_window_counts._2
+//    pool.withJedisClient { client =>
+//
+//      val dressUp = Dress.up(client)
+//      var windowUUID = dressUp.hmget(campaign, window_timestamp)(0)
+//      if (windowUUID == null) {
+//        windowUUID = UUID.randomUUID().toString
+//        dressUp.hset(campaign, window_timestamp, windowUUID)
+//        var windowListUUID: String = dressUp.hmget(campaign, "windows")(0)
+//        if (windowListUUID == null) {
+//          windowListUUID = UUID.randomUUID.toString
+//          dressUp.hset(campaign, "windows", windowListUUID)
+//        }
+//        dressUp.lpush(windowListUUID, window_timestamp)
+//      }
+//      dressUp.hincrBy(windowUUID, "seen_count", window_seenCount)
+//      dressUp.hset(windowUUID, "time_updated", currentTime.toString)
+//      return window_seenCount.toString
+//    }
+//
+//  }
+//}

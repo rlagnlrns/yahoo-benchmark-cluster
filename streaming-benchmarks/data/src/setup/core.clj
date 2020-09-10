@@ -209,7 +209,8 @@
     (redis/with-server {:host redis-host}
       (redis/flushall)
       (doseq [campaign campaigns]
-        (redis/sadd "campaigns" campaign)))))
+        (redis/sadd "campaigns" campaign))
+        )))
 
 (defn check-correct [redis-host]
   (let [stats (doall (dostats))]
@@ -244,11 +245,16 @@
         (write-to-redis campaigns ads (conf :redis-host))
         (write-to-kafka ads (conf :kakfa-brokers))
         (write-ids campaigns ads))
-      (write-to-redis campaigns ads))))
+      (write-to-redis campaigns ads)
+      )))
 
 (defn get-conf [confPath]
   (let [conf (yaml/parse-string (slurp confPath))
+        ;;redis-port (get conf :redis.port)
         redis-host (get conf :redis.host)
+        ;;redis-host (clojure.string/join (interpose "," (for [broker (get conf :redis.host)]
+        ;;                                                  )))
+ 	;;redis-host (get conf :redis.host)
         kafka-port (get conf :kafka.port)
         kafka-hosts (clojure.string/join (interpose "," (for [broker (get conf :kafka.brokers)]
                                                           (str broker ":" kafka-port))))]

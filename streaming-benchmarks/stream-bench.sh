@@ -11,11 +11,11 @@ MVN=${MVN:-mvn}
 GIT=${GIT:-git}
 MAKE=${MAKE:-make}
 
-KAFKA_VERSION=${KAFKA_VERSION:-"0.8.2.1"}
+KAFKA_VERSION=${KAFKA_VERSION:-"2.0.0"}
 REDIS_VERSION=${REDIS_VERSION:-"4.0.11"}
 SCALA_BIN_VERSION=${SCALA_BIN_VERSION:-"2.11"}
 SCALA_SUB_VERSION=${SCALA_SUB_VERSION:-"12"}
-SPARK_VERSION=${SPARK_VERSION:-"2.3.1"}
+SPARK_VERSION=${SPARK_VERSION:-"2.4.0"}
 HADOOP_VERSION=${HADOOP_VERSION:-"2.7.7"}
 
 REDIS_DIR="redis-$REDIS_VERSION"
@@ -27,7 +27,9 @@ HADOOP_DIR="hadoop-$HADOOP_VERSION"
 APACHE_MIRROR=$"https://archive.apache.org/dist"
 
 IP_LIST_INNER=("10.178.0.22" "10.178.0.23" "10.178.0.24")
+#IP_LIST_INNER=("10.178.0.22")
 IP_LIST_OUTER=("34.64.192.22" "34.64.235.200" "34.64.79.251")
+#IP_LIST_OUTER=("34.64.192.22")
 
 ZK_PORT="2181"
 ZK_CONNECTIONS=""
@@ -37,11 +39,13 @@ for value in "${IP_LIST_INNER[@]}"; do
 done
 KAFKA_PORT="9092"
 TOPIC=${TOPIC:-"ad-events"}
+#TOPIC=${TOPIC:-"ad-events-new"}
 PARTITIONS=${PARTITIONS:-6}
 REP_FACTOR=${REP_FACTOR:-3}
+#REP_FACTOR=${REP_FACTOR:-1}
 LOAD=${LOAD:-1000}
 CONF_FILE=./conf/localConf.yaml
-TEST_TIME=${TEST_TIME:-180}
+TEST_TIME=${TEST_TIME:-120}
 
 pid_match() {
    local VAL=`ps -aef | grep "$1" | grep -v grep | awk '{print $2}'`
@@ -136,7 +140,7 @@ run() {
     echo >> $CONF_FILE
     echo 'kafka.port: '$KAFKA_PORT >> $CONF_FILE
 	echo 'zookeeper.port: '$ZK_PORT >> $CONF_FILE
-	echo 'redis.host: "localhost"' >> $CONF_FILE
+	echo 'redis.host: "10.178.0.25"' >> $CONF_FILE
 	echo 'kafka.topic: "'$TOPIC'"' >> $CONF_FILE
 	echo 'kafka.partitions: '$PARTITIONS >> $CONF_FILE
 	echo 'process.hosts: 1' >> $CONF_FILE
@@ -164,50 +168,67 @@ run() {
     fetch_untar_file "$SPARK_FILE" "$APACHE_MIRROR/spark/spark-$SPARK_VERSION/$SPARK_FILE"
 
     #Fetch Hadoop
-    HADOOP_FILE="$HADOOP_DIR.tar.gz"
-    fetch_untar_file "$HADOOP_FILE" "$APACHE_MIRROR/hadoop/core/$HADOOP_FILE"
+    #HADOOP_FILE="$HADOOP_DIR.tar.gz"
+    #fetch_untar_file "$HADOOP_FILE" "$APACHE_MIRROR/hadoop/core/$HADOOP_FILE"
 
   elif [ "START_ZK" = "$OPERATION" ];
   then
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value /home/jinhuijun/kafka/bin/zookeeper-server-start.sh /home/jinhuijun/kafka/config/zookeeper.properties &
-	sleep 3
+	sleep 10
     done
   elif [ "STOP_ZK" = "$OPERATION" ];
   then
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value pkill -9 -ef QuorumPeerMain &
-        sleep 3
+        sleep 5
     done
   elif [ "START_REDIS" = "$OPERATION" ];
   then
-    start_if_needed redis-server Redis 1 "$REDIS_DIR/src/redis-server" "$REDIS_DIR/redis.conf"
+    for value in "${IP_LIST_INNER[@]}"; do
+        ssh jinhuijun@$value /home/jinhuijun/streaming-benchmarks/redis-4.0.11/src/redis-server /home/jinhuijun/streaming-benchmarks/redis-4.0.11/redis.conf &
+        sleep 10
+    done
+    #start_if_needed redis-server Redis 1 "$REDIS_DIR/src/redis-server" "$REDIS_DIR/redis.conf"
     cd data
-    $LEIN run -n --configPath ../conf/benchmarkConf.yaml
+    #$LEIN run -n --configPath ../conf/benchmarkConf.yaml
+    #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -n --configPath /home/jinhuijun/streaming-benchmarks/conf/benchmarkConf.yaml
     cd ..
   elif [ "STOP_REDIS" = "$OPERATION" ];
   then
-    stop_if_needed redis-server Redis
+    for value in "${IP_LIST_INNER[@]}"; do
+        ssh jinhuijun@$value pkill -9 -ef redis &
+	rm -f /home/jinhuijun/streaming-benchmarks/dump.rdb
+        sleep 5
+    done
+    pkill -9 -ef redis &
     rm -f dump.rdb
   elif [ "START_KAFKA" = "$OPERATION" ];
   then
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value /home/jinhuijun/kafka/bin/kafka-server-start.sh /home/jinhuijun/kafka/config/server.properties &
-        sleep 3
+        sleep 10
     done
     create_kafka_topic
   elif [ "STOP_KAFKA" = "$OPERATION" ];
   then
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value pkill -9 -ef Kafka &
-        sleep 3
+    	ssh jinhuijun@$value rm -rf /tmp/kafka-logs-new/meta.properties &
+        sleep 5
     done
   elif [ "START_SPARK" = "$OPERATION" ];
   then
     /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/start-dfs.sh
-    sleep 3
+    sleep 5
     /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/start-yarn.sh
-    sleep 3
+    sleep 5
+    hadoop dfsadmin -safemode leave
+    for value in "${IP_LIST_INNER[@]}"; do
+        ssh jinhuijun@$value hadoop dfsadmin -safemode leave &
+        sleep 5
+    done
+
 #    start_if_needed org.apache.spark.deploy.worker.Worker SparkSlave 5 $SPARK_DIR/sbin/start-slave.sh spark://localhost:7077
   elif [ "STOP_SPARK" = "$OPERATION" ];
   then
@@ -219,16 +240,18 @@ run() {
   then
     cd data
     start_if_needed leiningen.core.main "Load Generation" 1 $LEIN run -r -t $LOAD --configPath ../$CONF_FILE
+    #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -r -t $LOAD --configPath /home/jinhuijun/streaming-benchmarks/$CONF_FILE
     cd ..
   elif [ "STOP_LOAD" = "$OPERATION" ];
   then
     stop_if_needed leiningen.core.main "Load Generation"
-    cd data
-    $LEIN run -g --configPath ../$CONF_FILE || true
-    cd ..
+    #cd data
+    #$LEIN run -g --configPath ../$CONF_FILE || true
+    #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -g --configPath /home/jinhuijun/streaming-benchmarks/$CONF_FILE || true
+    #cd ..
   elif [ "START_SPARK_PROCESSING" = "$OPERATION" ];
   then
-    "$SPARK_DIR/bin/spark-submit" --master yarn --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
+    "$SPARK_DIR/bin/spark-submit" --packages org.apache.spark:spark-sql-kafka-0-10_2.11:$SPARK_VERSION  --master yarn --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
 #    "$SPARK_DIR/bin/spark-submit" --master spark://localhost:7077 --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
     sleep 5
   elif [ "STOP_SPARK_PROCESSING" = "$OPERATION" ];
@@ -258,7 +281,11 @@ run() {
     run "STOP_REDIS"
     run "STOP_ZK"
   else
-    if [ "HELP" != "$OPERATION" ];
+  doop dfsamin -safemode leave
+hadoop dfsadmin -safemode leave
+hdfs dfsadmin -safemode leave
+hadoop dfsadmin -safemode leave
+  if [ "HELP" != "$OPERATION" ];
     then
       echo "UNKOWN OPERATION '$OPERATION'"
       echo

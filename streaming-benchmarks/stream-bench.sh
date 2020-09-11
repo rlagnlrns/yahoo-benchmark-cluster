@@ -189,16 +189,16 @@ run() {
         ssh jinhuijun@$value /home/jinhuijun/streaming-benchmarks/redis-4.0.11/src/redis-server /home/jinhuijun/streaming-benchmarks/redis-4.0.11/redis.conf &
         sleep 10
     done
-    #start_if_needed redis-server Redis 1 "$REDIS_DIR/src/redis-server" "$REDIS_DIR/redis.conf"
+    start_if_needed redis-server Redis 1 "$REDIS_DIR/src/redis-server" "$REDIS_DIR/redis.conf"
     cd data
-    #$LEIN run -n --configPath ../conf/benchmarkConf.yaml
+    $LEIN run -n --configPath ../conf/benchmarkConf.yaml
     #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -n --configPath /home/jinhuijun/streaming-benchmarks/conf/benchmarkConf.yaml
     cd ..
   elif [ "STOP_REDIS" = "$OPERATION" ];
   then
     for value in "${IP_LIST_INNER[@]}"; do
         ssh jinhuijun@$value pkill -9 -ef redis &
-	rm -f /home/jinhuijun/streaming-benchmarks/dump.rdb
+	ssh jinhuijun@$value rm -f /home/jinhuijun/streaming-benchmarks/dump.rdb
         sleep 5
     done
     pkill -9 -ef redis &
@@ -246,7 +246,7 @@ run() {
   then
     stop_if_needed leiningen.core.main "Load Generation"
     #cd data
-    #$LEIN run -g --configPath ../$CONF_FILE || true
+    $LEIN run -g --configPath ../$CONF_FILE || true
     #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -g --configPath /home/jinhuijun/streaming-benchmarks/$CONF_FILE || true
     #cd ..
   elif [ "START_SPARK_PROCESSING" = "$OPERATION" ];

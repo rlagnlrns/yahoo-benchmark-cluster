@@ -99,6 +99,7 @@ object KafkaRedisAdvertisingStream {
     //val query = df3.writeStream.format("console").start().awaitTermination()
 
     val query = df3.writeStream.outputMode("update").foreachBatch{(batchDF: DataFrame,batchId: Long)=>
+    println("========================================================================Here===============================================================")
     batchDF.foreachPartition(writeRedisTopLevel(_,redisHost))}.start()
     query.awaitTermination()
 

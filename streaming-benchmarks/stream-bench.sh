@@ -27,9 +27,7 @@ HADOOP_DIR="hadoop-$HADOOP_VERSION"
 APACHE_MIRROR=$"https://archive.apache.org/dist"
 
 IP_LIST_INNER=("10.178.0.22" "10.178.0.23" "10.178.0.24")
-#IP_LIST_INNER=("10.178.0.22")
 IP_LIST_OUTER=("34.64.192.22" "34.64.235.200" "34.64.79.251")
-#IP_LIST_OUTER=("34.64.192.22")
 
 ZK_PORT="2181"
 ZK_CONNECTIONS=""
@@ -39,10 +37,8 @@ for value in "${IP_LIST_INNER[@]}"; do
 done
 KAFKA_PORT="9092"
 TOPIC=${TOPIC:-"ad-events"}
-#TOPIC=${TOPIC:-"ad-events-new"}
 PARTITIONS=${PARTITIONS:-6}
 REP_FACTOR=${REP_FACTOR:-3}
-#REP_FACTOR=${REP_FACTOR:-1}
 LOAD=${LOAD:-1000}
 CONF_FILE=./conf/localConf.yaml
 TEST_TIME=${TEST_TIME:-120}
@@ -145,8 +141,6 @@ run() {
 	echo 'kafka.partitions: '$PARTITIONS >> $CONF_FILE
 	echo 'process.hosts: 1' >> $CONF_FILE
 	echo 'process.cores: 4' >> $CONF_FILE
-	#echo 'storm.workers: 1' >> $CONF_FILE
-	#echo 'storm.ackers: 2' >> $CONF_FILE
 	echo 'spark.batchtime: 2000' >> $CONF_FILE
 	
     $MVN clean install -Dspark.version="$SPARK_VERSION" -Dkafka.version="$KAFKA_VERSION" -Dscala.binary.version="$SCALA_BIN_VERSION" -Dscala.version="$SCALA_BIN_VERSION.$SCALA_SUB_VERSION"
@@ -192,7 +186,6 @@ run() {
     start_if_needed redis-server Redis 1 "$REDIS_DIR/src/redis-server" "$REDIS_DIR/redis.conf"
     cd data
     $LEIN run -n --configPath ../conf/benchmarkConf.yaml
-    #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -n --configPath /home/jinhuijun/streaming-benchmarks/conf/benchmarkConf.yaml
     cd ..
   elif [ "STOP_REDIS" = "$OPERATION" ];
   then
@@ -229,30 +222,22 @@ run() {
         sleep 5
     done
 
-#    start_if_needed org.apache.spark.deploy.worker.Worker SparkSlave 5 $SPARK_DIR/sbin/start-slave.sh spark://localhost:7077
   elif [ "STOP_SPARK" = "$OPERATION" ];
   then
     /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/stop-all.sh
-#    stop_if_needed org.apache.spark.deploy.master.Master Master
-#    stop_if_needed org.apache.spark.deploy.worker.Worker SparkSlave
     sleep 3
   elif [ "START_LOAD" = "$OPERATION" ];
   then
     cd data
     start_if_needed leiningen.core.main "Load Generation" 1 $LEIN run -r -t $LOAD --configPath ../$CONF_FILE
-    #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -r -t $LOAD --configPath /home/jinhuijun/streaming-benchmarks/$CONF_FILE
     cd ..
   elif [ "STOP_LOAD" = "$OPERATION" ];
   then
     stop_if_needed leiningen.core.main "Load Generation"
-    #cd data
     $LEIN run -g --configPath ../$CONF_FILE || true
-    #ssh jinhuijun@10.178.0.24 /home/jinhuijun/streaming-benchmarks/$LEIN run -g --configPath /home/jinhuijun/streaming-benchmarks/$CONF_FILE || true
-    #cd ..
   elif [ "START_SPARK_PROCESSING" = "$OPERATION" ];
   then
     "$SPARK_DIR/bin/spark-submit" --packages org.apache.spark:spark-sql-kafka-0-10_2.11:$SPARK_VERSION  --master yarn --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
-#    "$SPARK_DIR/bin/spark-submit" --master spark://localhost:7077 --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
     sleep 5
   elif [ "STOP_SPARK_PROCESSING" = "$OPERATION" ];
   then

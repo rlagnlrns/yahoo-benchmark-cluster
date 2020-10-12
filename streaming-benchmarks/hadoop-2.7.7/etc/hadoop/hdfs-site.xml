@@ -21,6 +21,14 @@
                 <value>3</value>
         </property>
         <property>
+                <name>dfs.namenode.name.dir</name>
+                <value>/home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/hadoopname</value>
+        </property>
+        <property>
+                <name>dfs.datanode.data.dir</name>
+                <value>/home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/hadoopdata</value>
+        </property>
+        <property>
                 <name>dfs.namenode.datanode.registration.ip-hostname-check</name>
                 <value>false</value>
         </property>

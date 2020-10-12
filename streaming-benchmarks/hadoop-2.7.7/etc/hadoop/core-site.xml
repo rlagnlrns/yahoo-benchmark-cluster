@@ -22,5 +22,9 @@
     <!--<value>hdfs://192.168.1.4:9007</value>-->
     <value>hdfs://10.178.0.25:9007</value>
   </property>
+  <property>
+    <name>hadoop.tmp.dir</name>
+    <value>/home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/hadooptmp</value>
+  </property>
 </configuration>
 

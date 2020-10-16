@@ -5,18 +5,12 @@ kafka.brokers:
     - "10.178.0.22"
     - "10.178.0.23"
     - "10.178.0.24"
-    #- "34.64.192.22"
-    #- "34.64.235.200"
-    #- "34.64.79.251"
 
 zookeeper.servers:
     - "10.178.0.22"
     - "10.178.0.23"
     - "10.178.0.24"
-    #- "34.64.192.22"
-    #- "34.64.235.200"
-    #- "34.64.79.251"
-    #
+    
 redis.hosts:
     - "10.178.0.22"
     - "10.178.0.23"
@@ -28,13 +22,6 @@ zookeeper.port: 2181
 redis.port: 6379
 kafka.topic: "ad-events"
 kafka.partitions: 6
-
 process.hosts: 1
 process.cores: 4
-
-#STORM Specific
-storm.workers: 1
-storm.ackers: 2
-
-#Spark Specific
 spark.batchtime: 2000

@@ -12,12 +12,10 @@ import java.util.HashSet
 
 import org.apache.spark.streaming
 
-import org.apache.spark.SparkConf
 import org.json.JSONObject
 import org.sedis._
 import redis.clients.jedis._
 import scala.collection.Iterator
-import org.apache.spark.rdd.RDD
 import benchmark.common.Utils
 import scala.collection.JavaConverters._
 import scala.collection.mutable.Buffer
@@ -25,18 +23,11 @@ import scala.collection.mutable.Buffer
 import org.apache.spark.sql._
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.functions.{from_json,col}
-import org.apache.spark.sql.streaming.Trigger
 
 object KafkaRedisAdvertisingStream {
   def main(args: Array[String]) {
 
     val commonConfig = Utils.findAndReadConfigFile(args(0), true).asInstanceOf[java.util.Map[String, Any]];
-
-    val redisPost = commonConfig.get("redis.host") match {
-      case s: String => s
-      case other => throw new ClassCastException(other + " not a List[String]")
-    }
-    val redisHost = List("10.178.0.22","10.178.0.23","10.178.0.24")
 
     val redisHosts = commonConfig.get("redis.hosts").asInstanceOf[java.util.List[String]] match {
       case l: java.util.List[String] => l.asScala.toSeq
@@ -53,22 +44,19 @@ object KafkaRedisAdvertisingStream {
 
     val brokers = joinHosts(kafkaHosts, kafkaPort)
 
-    val spark = SparkSession.builder.appName("KafkaReader").getOrCreate()
-    val df = spark.readStream.format("kafka").option("kafka.bootstrap.servers",brokers).option("subscribe","ad-events").load()
-    df.printSchema()
+    val spark = SparkSession.builder.appName("KafkaRedisAdvertisingStream").getOrCreate()
+    val rawDataFromKafka = spark.readStream.format("kafka").option("kafka.bootstrap.servers",brokers).option("subscribe","ad-events").load()
 
     import spark.implicits._
-    val df2 = df.selectExpr("CAST(value AS STRING)")
+    val dataFromKafka = rawDataFromKafka.selectExpr("CAST(value AS STRING)")
     val struct = new StructType().add(StructField("user_id", StringType,false)).add(StructField("page_id", StringType,false))
     .add(StructField("ad_id", StringType,false)).add(StructField("ad_type", StringType,false)).add(StructField("event_type", StringType,false))
     .add(StructField("event_time", StringType,true)).add(StructField("ip_address", StringType,false))
-    val events = df2.select(from_json($"value",struct).as("events"))
-    events.printSchema()
+    val events = dataFromKafka.select(from_json($"value",struct).as("events"))
 
-    val df3 = events.select("events.ad_id","events.event_time","events.event_type")
-    df3.printSchema()
+    val filteredData = events.select("events.ad_id","events.event_time","events.event_type").filter("events.event_type == 'view'")
 
-    val query = df3.writeStream.foreach(
+    val query = filteredData.writeStream.foreach(
       new ForeachWriter[Row]{
           val jedisClusterNodes = new HashSet[HostAndPort]
 
@@ -95,18 +83,11 @@ object KafkaRedisAdvertisingStream {
           }
           
           override def close(errorOrNull: Throwable)={
+	      jc.close()
           }
       }
     ).start()
     query.awaitTermination()
-
-    //val jedisClusterNodes = new HashSet[HostAndPort]
-    //redisHost.foreach(host=> jedisClusterNodes.add(new HostAndPort(host,6379)))
-    //val jc: JedisCluster = new JedisCluster(jedisClusterNodes)
-
-    //val query = df3.writeStream.outputMode("update").foreachBatch{(batchDF: DataFrame,batchId: Long)=>
-    //batchDF.foreachPartition(writeRedisTopLevel(_,jc))}.start()
-    //query.awaitTermination()
   }
 
   def joinHosts(hosts: Seq[String], port: String): String = {
@@ -121,18 +102,5 @@ object KafkaRedisAdvertisingStream {
       joined.append(host).append(":").append(port);
     })
     return joined.toString();
-  }
-
-  def writeRedisTopLevel(items: Iterator[org.apache.spark.sql.Row], jc: JedisCluster) {
-    //val pool = new Pool(new JedisPool(new JedisPoolConfig(), redisHost, 6379, 2000))
-    items.foreach(item => writeWindow(jc, item))
-    jc.close()
-  }
-
-  private def writeWindow(jc: JedisCluster, item: org.apache.spark.sql.Row) : String = {
-    val event_time = item(1).toString()
-    val event_type = item(2).toString()
-    jc.hset(event_time,"event_type",event_type)
-    return "event_type"
   }
 }

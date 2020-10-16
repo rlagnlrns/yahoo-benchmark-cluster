@@ -27,7 +27,6 @@ HADOOP_DIR="hadoop-$HADOOP_VERSION"
 APACHE_MIRROR=$"https://archive.apache.org/dist"
 
 IP_LIST_INNER=("10.178.0.22" "10.178.0.23" "10.178.0.24")
-IP_LIST_OUTER=("34.64.192.22" "34.64.235.200" "34.64.79.251")
 
 ZK_PORT="2181"
 ZK_CONNECTIONS=""
@@ -118,6 +117,13 @@ create_kafka_topic() {
     fi
 }
 
+phase_teller(){
+	phase=$1
+	echo 
+	echo "<--------------------$phase-------------------->"
+	echo 
+}
+
 run() {
   OPERATION=$1
   if [ "SETUP" = "$OPERATION" ];
@@ -167,18 +173,21 @@ run() {
 
   elif [ "START_ZK" = "$OPERATION" ];
   then
+    phase_teller "START_ZK"
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value /home/jinhuijun/kafka/bin/zookeeper-server-start.sh /home/jinhuijun/kafka/config/zookeeper.properties &
 	sleep 10
     done
   elif [ "STOP_ZK" = "$OPERATION" ];
   then
+    phase_teller "STOP_ZK"
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value pkill -9 -ef QuorumPeerMain &
         sleep 5
     done
   elif [ "START_REDIS" = "$OPERATION" ];
   then
+    phase_teller "START_REDIS"
     for value in "${IP_LIST_INNER[@]}"; do
         ssh jinhuijun@$value /home/jinhuijun/streaming-benchmarks/redis-4.0.11/src/redis-server /home/jinhuijun/streaming-benchmarks/redis-4.0.11/redis.conf &
         sleep 10
@@ -189,15 +198,17 @@ run() {
     cd ..
   elif [ "STOP_REDIS" = "$OPERATION" ];
   then
+    phase_teller "STOP_REDIS"
     for value in "${IP_LIST_INNER[@]}"; do
         ssh jinhuijun@$value pkill -9 -ef redis &
-	ssh jinhuijun@$value rm -f /home/jinhuijun/streaming-benchmarks/dump.rdb
+	ssh jinhuijun@$value rm -f /home/jinhuijun/dump.rdb
         sleep 5
     done
     pkill -9 -ef redis &
     rm -f dump.rdb
   elif [ "START_KAFKA" = "$OPERATION" ];
   then
+    phase_teller "START_KAFKA"
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value /home/jinhuijun/kafka/bin/kafka-server-start.sh /home/jinhuijun/kafka/config/server.properties &
         sleep 10
@@ -205,42 +216,46 @@ run() {
     create_kafka_topic
   elif [ "STOP_KAFKA" = "$OPERATION" ];
   then
+    phase_teller "STOP_KAFKA"
     for value in "${IP_LIST_INNER[@]}"; do
     	ssh jinhuijun@$value pkill -9 -ef Kafka &
-    	ssh jinhuijun@$value rm -rf /tmp/kafka-logs-new/meta.properties &
+    	ssh jinhuijun@$value rm -rf /home/jinhuijun/kafka/kafka-logs-new/meta.properties &
         sleep 5
     done
   elif [ "START_SPARK" = "$OPERATION" ];
   then
+    phase_teller "START_SPARK"
     /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/start-dfs.sh
     sleep 5
     /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/start-yarn.sh
     sleep 5
-    hadoop dfsadmin -safemode leave
-    for value in "${IP_LIST_INNER[@]}"; do
-        ssh jinhuijun@$value hadoop dfsadmin -safemode leave &
-        sleep 5
-    done
-
+    hdfs dfsadmin -safemode leave
   elif [ "STOP_SPARK" = "$OPERATION" ];
   then
-    /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/stop-all.sh
+    phase_teller "STOP_SPARK"
+    /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/stop-yarn.sh
+    sleep 3
+    /home/jinhuijun/streaming-benchmarks/hadoop-2.7.7/sbin/stop-dfs.sh
     sleep 3
   elif [ "START_LOAD" = "$OPERATION" ];
   then
+    phase_teller "START_LOAD"
     cd data
     start_if_needed leiningen.core.main "Load Generation" 1 $LEIN run -r -t $LOAD --configPath ../$CONF_FILE
     cd ..
   elif [ "STOP_LOAD" = "$OPERATION" ];
   then
+    phase_teller "STOP_LOAD"
     stop_if_needed leiningen.core.main "Load Generation"
     $LEIN run -g --configPath ../$CONF_FILE || true
   elif [ "START_SPARK_PROCESSING" = "$OPERATION" ];
   then
+    phase_teller "START_SPARK_PROCESSING"
     "$SPARK_DIR/bin/spark-submit" --packages org.apache.spark:spark-sql-kafka-0-10_2.11:$SPARK_VERSION  --master yarn --class spark.benchmark.KafkaRedisAdvertisingStream ./spark-benchmarks/target/spark-benchmarks-0.1.0.jar "$CONF_FILE" &
     sleep 5
   elif [ "STOP_SPARK_PROCESSING" = "$OPERATION" ];
   then
+    phase_teller "STOP_SPARK_PROCESSING"
     stop_if_needed spark.benchmark.KafkaRedisAdvertisingStream "Spark Client Process"
   elif [ "SPARK_TEST" = "$OPERATION" ];
   then
@@ -266,10 +281,6 @@ run() {
     run "STOP_REDIS"
     run "STOP_ZK"
   else
-  doop dfsamin -safemode leave
-hadoop dfsadmin -safemode leave
-hdfs dfsadmin -safemode leave
-hadoop dfsadmin -safemode leave
   if [ "HELP" != "$OPERATION" ];
     then
       echo "UNKOWN OPERATION '$OPERATION'"

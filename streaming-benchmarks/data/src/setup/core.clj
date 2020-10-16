@@ -251,11 +251,7 @@
 
 (defn get-conf [confPath]
   (let [conf (yaml/parse-string (slurp confPath))
-        ;;redis-port (get conf :redis.port)
         redis-host (get conf :redis.host)
-        ;;redis-host (clojure.string/join (interpose "," (for [broker (get conf :redis.host)]
-        ;;                                                  )))
- 	;;redis-host (get conf :redis.host)
         kafka-port (get conf :kafka.port)
         kafka-hosts (clojure.string/join (interpose "," (for [broker (get conf :kafka.brokers)]
                                                           (str broker ":" kafka-port))))]
